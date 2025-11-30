@@ -10,7 +10,6 @@ import {
   DropZone,
   TextField,
   Banner,
-  Badge,
   Icon,
   Link,
   Popover,
@@ -24,6 +23,7 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { useLoaderData, useNavigate } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { JobList } from "../components/JobList";
 
 export const loader = async ({ request }: { request: Request }) => {
   await authenticate.admin(request);
@@ -50,36 +50,7 @@ export default function Index() {
 
   const handleUrlChange = useCallback((value: string) => setUrl(value), []);
 
-  // Map Prisma jobs to the display format, merging with mock data for missing fields if needed
-  const jobs = prismaJobs.map((job: any) => {
-    let resultFile = null;
-    try {
-      const details = JSON.parse(job.details || "{}");
-      if (job.status === "Finished" && details.file) {
-        resultFile = details.file;
-      }
-    } catch (e) {
-      // ignore
-    }
 
-    return {
-      id: job.id,
-      type: job.type,
-      entity: job.entity,
-      status: job.status,
-      statusTone: job.status === "Finished" ? "success" : job.status === "Queued" ? "info" : "critical",
-      date: new Date(job.createdAt).toLocaleString(),
-      duration: "0 sec", // Placeholder
-      progress: job.status === "Finished" ? 100 : 0,
-      processed: 0,
-      total: 0,
-      new: 0,
-      updated: 0,
-      failed: 0,
-      file: "Export.xlsx", // Placeholder
-      resultFile: resultFile,
-    };
-  });
 
 
   return (
@@ -182,80 +153,10 @@ export default function Index() {
 
             {/* Jobs List */}
             <BlockStack gap="400">
-              {jobs.map((job: any) => (
-                <Card key={job.id}>
-                  <InlineStack align="space-between" wrap={false} gap="400">
-                    {/* Icon Column */}
-                    <div style={{ minWidth: "40px" }}>
-                      <div
-                        style={{
-                          background: "#e3e3e3",
-                          borderRadius: "50%",
-                          width: "40px",
-                          height: "40px",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Icon source={ImportIcon} tone="subdued" />
-                      </div>
-                      <div style={{ textAlign: "center", marginTop: "4px" }}>
-                        <Text as="span" variant="bodyXs" tone="subdued">
-                          {job.type}
-                        </Text>
-                        <br />
-                        <Link url="#">#{job.id}</Link>
-                      </div>
-                    </div>
-
-                    {/* Main Content Column */}
-                    <div style={{ flexGrow: 1 }}>
-                      <BlockStack gap="200">
-                        <InlineStack align="space-between">
-                          <Text as="h3" variant="headingSm">
-                            {job.entity || "Unknown"}
-                          </Text>
-                          <Badge tone={job.statusTone as any}>{job.status}</Badge>
-                        </InlineStack>
-
-                        {job.status !== "Cancelled" && (
-                          <InlineStack gap="200">
-                            <Badge tone="info">{`${job.processed || 0} of ${job.total || 0}`}</Badge>
-                            {job.new && job.new > 0 ? <Badge tone="success">{`New: ${job.new}`}</Badge> : null}
-                            {job.updated && job.updated > 0 ? <Badge tone="success">{`Updated: ${job.updated}`}</Badge> : null}
-                            {job.warnings ? <Badge tone="warning">{`Warnings: ${job.warnings}`}</Badge> : null}
-                          </InlineStack>
-                        )}
-
-                        <Text as="p" variant="bodyXs" tone="subdued">
-                          {job.date} {job.duration && `Duration: ${job.duration}`}
-                        </Text>
-                      </BlockStack>
-                    </div>
-
-                    {/* Actions/Files Column */}
-                    <div style={{ textAlign: "right", minWidth: "150px" }}>
-                      <BlockStack gap="100" align="end">
-                        <Badge>Matrixify</Badge>
-                        {job.status === "Finished" && (
-                          <Badge tone="warning">Finished / Limited</Badge>
-                        )}
-                        {job.status === "Cancelled" && (
-                          <Badge tone="critical">Cancelled</Badge>
-                        )}
-
-                        <Link url="#" removeUnderline>{job.file}</Link>
-                        {job.resultFile && (
-                          <a href={job.resultFile} download style={{ color: "#008060", textDecoration: "none", fontSize: "12px" }}>
-                            Download Result
-                          </a>
-                        )}
-                      </BlockStack>
-                    </div>
-                  </InlineStack>
-                </Card>
-              ))}
+              <JobList jobs={prismaJobs} />
+              <div style={{ textAlign: "center", marginTop: "10px" }}>
+                <Button variant="plain" onClick={() => navigate("/app/all-jobs")}>View all Jobs</Button>
+              </div>
             </BlockStack>
           </BlockStack>
         </Layout.Section>

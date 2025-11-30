@@ -44,7 +44,7 @@ import {
     FilterIcon,
 } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { useNavigate, useSubmit, Form } from "react-router";
+import { useNavigate, useSubmit, Form, useLoaderData } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { redirect } from "react-router";
@@ -55,142 +55,26 @@ import path from "path";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
     await authenticate.admin(request);
-    return null;
-};
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-    const { admin } = await authenticate.admin(request);
-    const formData = await request.formData();
-    const sheets = JSON.parse(formData.get("sheets") as string);
-    const columns = JSON.parse(formData.get("columns") as string);
-    const format = formData.get("format") as string;
+    // Parse URL parameters for pre-filling form (from "Export Again" button)
+    const url = new URL(request.url);
+    const sheetsParam = url.searchParams.get('sheets');
+    const columnsParam = url.searchParams.get('columns');
+    const formatParam = url.searchParams.get('format');
 
-    const sheetName = AVAILABLE_SHEETS.find(s => s.id === sheets[0])?.name || sheets[0];
-    const entityName = sheets.length === 1 ? sheetName : `${sheets.length} Sheets`;
+    let presetSheets: string[] = [];
+    let presetColumns: string[] = [];
+    let presetFormat = 'matrixify-excel';
 
-    // Create job initially as Queued
-    const job = await prisma.job.create({
-        data: {
-            type: "Export",
-            entity: entityName,
-            status: "Queued",
-            details: JSON.stringify({ sheets, columns, format }),
-        }
-    });
-
-    // Process Export (Simplified inline processing)
     try {
-        const wb = XLSX.utils.book_new();
-        let hasData = false;
-
-        if (sheets.includes("products")) {
-            const response = await admin.graphql(
-                `#graphql
-                query {
-                    products(first: 50) {
-                        edges {
-                            node {
-                                id
-                                title
-                                handle
-                                vendor
-                                productType
-                                status
-                                totalInventory
-                                createdAt
-                                updatedAt
-                                tags
-                                variants(first: 10) {
-                                    edges {
-                                        node {
-                                            id
-                                            sku
-                                            price
-                                            barcode
-                                            weight
-                                            inventoryQuantity
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }`
-            );
-            const data = await response.json();
-            const products = data.data.products.edges.map((edge: any) => {
-                const p = edge.node;
-                // Flatten data for Excel - simple version taking first variant
-                const v = p.variants.edges[0]?.node || {};
-
-                // Map based on selected columns or defaults
-                // This is a simplified mapping. In a real app, you'd map dynamically based on `columns`
-                return {
-                    "ID": p.id,
-                    "Handle": p.handle,
-                    "Command": "UPDATE", // Default for Matrixify
-                    "Title": p.title,
-                    "Body HTML": "",
-                    "Vendor": p.vendor,
-                    "Type": p.productType,
-                    "Tags": p.tags.join(", "),
-                    "Status": p.status,
-                    "Variant SKU": v.sku,
-                    "Variant Price": v.price,
-                    "Variant Inventory Qty": v.inventoryQuantity,
-                    "Variant Weight": v.weight,
-                    "Variant Barcode": v.barcode
-                };
-            });
-
-            const ws = XLSX.utils.json_to_sheet(products);
-            XLSX.utils.book_append_sheet(wb, ws, "Products");
-            hasData = true;
-        }
-
-        if (hasData) {
-            const fileName = `Export_${new Date().toISOString().replace(/[:.]/g, "-")}.xlsx`;
-            const publicDir = path.join(process.cwd(), "public", "exports");
-
-            if (!fs.existsSync(publicDir)) {
-                fs.mkdirSync(publicDir, { recursive: true });
-            }
-
-            const filePath = path.join(publicDir, fileName);
-            XLSX.writeFile(wb, filePath);
-
-            // Update job to Finished
-            await prisma.job.update({
-                where: { id: job.id },
-                data: {
-                    status: "Finished",
-                    // Store relative path for download
-                    details: JSON.stringify({
-                        sheets,
-                        columns,
-                        format,
-                        file: `/exports/${fileName}`,
-                        fileName: fileName
-                    })
-                }
-            });
-        } else {
-            // Update job to Failed if no data processed (or handle empty)
-            await prisma.job.update({
-                where: { id: job.id },
-                data: { status: "Finished" } // Mark finished even if empty for now
-            });
-        }
-
-    } catch (error) {
-        console.error("Export failed:", error);
-        await prisma.job.update({
-            where: { id: job.id },
-            data: { status: "Failed" }
-        });
+        if (sheetsParam) presetSheets = JSON.parse(sheetsParam);
+        if (columnsParam) presetColumns = JSON.parse(columnsParam);
+        if (formatParam) presetFormat = formatParam;
+    } catch (e) {
+        console.error('Error parsing URL parameters:', e);
     }
 
-    return redirect("/app");
+    return { presetSheets, presetColumns, presetFormat };
 };
 
 // Mock Data for Sheets
@@ -293,20 +177,537 @@ const PRODUCTS_COLUMNS = [
 
 const TOTAL_PRODUCTS_COLUMNS = PRODUCTS_COLUMNS.reduce((acc, group) => acc + group.columns.length, 0);
 
+export const action = async ({ request }: ActionFunctionArgs) => {
+    console.log("[Export] Action started");
+    const { admin } = await authenticate.admin(request);
+    const formData = await request.formData();
+    const sheets = JSON.parse(formData.get("sheets") as string);
+    const columns = JSON.parse(formData.get("columns") as string);
+    const format = formData.get("format") as string;
+    console.log("[Export] Sheets:", sheets, "Columns count:", columns.length, "Format:", format);
+
+    const sheetName = AVAILABLE_SHEETS.find(s => s.id === sheets[0])?.name || sheets[0];
+    const entityName = sheets.length === 1 ? sheetName : `${sheets.length} Sheets`;
+
+    // Generate a 10-digit unique ID
+    const jobId = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+
+    // Create job with progress tracking
+    const job = await prisma.job.create({
+        data: {
+            id: jobId,
+            type: "Export",
+            entity: entityName,
+            status: "Processing",
+            details: JSON.stringify({ sheets, columns, format }),
+            progress: 0,
+            totalItems: 0,
+            processedItems: 0
+        }
+    });
+
+    // Process Export with pagination
+    try {
+        const wb = XLSX.utils.book_new();
+        let hasData = false;
+        let finalColumns = columns;
+
+        if (sheets.includes("products")) {
+            // Helper function to fetch remaining variants if product has more than batch size
+            const fetchAllVariants = async (productId: string, initialVariants: any[], hasMore: boolean, batchSize: number, locationCount: number) => {
+                const allVariants = [...initialVariants];
+                let hasNextPage = hasMore;
+                let cursor = initialVariants[initialVariants.length - 1]?.cursor;
+
+                while (hasNextPage) {
+                    const query = `#graphql
+                        query ($productId: ID!, $cursor: String) {
+                            product(id: $productId) {
+                                variants(first: ${batchSize}, after: $cursor) {
+                                    pageInfo {
+                                        hasNextPage
+                                    }
+                                    edges {
+                                        cursor
+                                        node {
+                                            id
+                                            sku
+                                            price
+                                            compareAtPrice
+                                            barcode
+                                            position
+                                            taxable
+                                            selectedOptions {
+                                                name
+                                                value
+                                            }
+                                            inventoryItem {
+                                                id
+                                                tracked
+                                                inventoryLevels(first: ${locationCount}) {
+                                                    edges {
+                                                        node {
+                                                            location {
+                                                                id
+                                                                name
+                                                            }
+                                                            quantities(names: ["available", "on_hand", "committed", "reserved", "damaged", "safety_stock", "quality_control", "incoming"]) {
+                                                                name
+                                                                quantity
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    `;
+
+                    const response = await admin.graphql(query, {
+                        variables: { productId, cursor }
+                    });
+
+                    const data = await response.json();
+                    if (data.errors) {
+                        console.error("[Export] Error fetching more variants:", data.errors);
+                        break;
+                    }
+
+                    const moreVariants = data.data.product.variants;
+                    allVariants.push(...moreVariants.edges);
+                    hasNextPage = moreVariants.pageInfo.hasNextPage;
+                    cursor = moreVariants.edges[moreVariants.edges.length - 1]?.cursor;
+                }
+
+                return allVariants;
+            };
+
+            // First, fetch all active locations
+            const locationsResponse = await admin.graphql(`
+                query {
+                    locations(first: 250) {
+                        edges {
+                            node {
+                                id
+                                name
+                                isActive
+                            }
+                        }
+                    }
+                }
+            `);
+            const locationsData = await locationsResponse.json();
+            const locations = locationsData.data.locations.edges
+                .filter((edge: any) => edge.node.isActive)
+                .map((edge: any) => ({
+                    id: edge.node.id,
+                    name: edge.node.name
+                }));
+
+            console.log(`[Export] Found ${locations.length} active locations:`, locations.map((l: any) => l.name));
+
+            // Expand inventory placeholder columns
+            const inventoryPlaceholders = [
+                "Inventory Available: ...", "Inventory Damaged Adjust: ...", "Inventory Available Adjust: ...",
+                "Inventory Safety Stock: ...", "Inventory On Hand: ...", "Inventory Safety Stock Adjust: ...",
+                "Inventory On Hand Adjust: ...", "Inventory Quality Control: ...", "Inventory Committed: ...",
+                "Inventory Quality Control Adjust: ...", "Inventory Reserved: ...", "Inventory Incoming: ...",
+                "Inventory Damaged: ..."
+            ];
+
+            const hasInventoryPlaceholders = finalColumns.some(col => inventoryPlaceholders.includes(col));
+
+            if (hasInventoryPlaceholders) {
+                const newColumns: string[] = [];
+                finalColumns.forEach(col => {
+                    if (inventoryPlaceholders.includes(col)) {
+                        const fieldName = col.replace(": ...", ""); // e.g. "Inventory Available"
+                        locations.forEach((loc: any) => {
+                            newColumns.push(`${fieldName}: ${loc.name}`);
+                        });
+                    } else {
+                        newColumns.push(col);
+                    }
+                });
+                finalColumns = newColumns;
+                console.log(`[Export] Expanded columns to ${finalColumns.length} (added location columns)`);
+            }
+
+            // Calculate dynamic batch sizes to stay under query cost limit (1000)
+            const locationCount = Math.max(locations.length, 1);
+            const MAX_COST = 900; // Safety buffer
+
+            // Strategy: Keep product batch size small to allow for more variants per product
+            const PRODUCT_BATCH_SIZE = 5;
+
+            // Calculate max variants we can fetch per product in the main query
+            // Cost formula: ProductBatch * (1 + VariantBatch * (1 + LocationCount)) <= MaxCost
+            // VariantBatch <= ((MaxCost / ProductBatch) - 1) / (1 + LocationCount)
+            let VARIANT_BATCH_SIZE_MAIN = Math.floor(((MAX_COST / PRODUCT_BATCH_SIZE) - 1) / (1 + locationCount));
+            VARIANT_BATCH_SIZE_MAIN = Math.min(Math.max(VARIANT_BATCH_SIZE_MAIN, 1), 100); // Clamp between 1 and 100
+
+            // Calculate max variants for the helper query (fetching single product)
+            // Cost formula: 1 + VariantBatch * (1 + LocationCount) <= MaxCost
+            let VARIANT_BATCH_SIZE_HELPER = Math.floor((MAX_COST - 1) / (1 + locationCount));
+            VARIANT_BATCH_SIZE_HELPER = Math.min(Math.max(VARIANT_BATCH_SIZE_HELPER, 1), 250); // Clamp between 1 and 250
+
+            console.log(`[Export] Dynamic Batch Sizes: Locations=${locationCount}, Products=${PRODUCT_BATCH_SIZE}, Variants(Main)=${VARIANT_BATCH_SIZE_MAIN}, Variants(Helper)=${VARIANT_BATCH_SIZE_HELPER}`);
+
+            // Get total product count
+            const countResponse = await admin.graphql(`
+                query {
+                    productsCount {
+                        count
+                    }
+                }
+            `);
+            const countData = await countResponse.json();
+            const totalProducts = countData.data?.productsCount?.count || 0;
+
+            console.log(`[Export] Total products to export: ${totalProducts}`);
+
+            // Update job with total items
+            await prisma.job.update({
+                where: { id: job.id },
+                data: { totalItems: totalProducts }
+            });
+
+            // Fetch products in batches with pagination
+            let allProductEdges: any[] = [];
+            let hasNextPage = true;
+            let cursor: string | null = null;
+            let totalFetched = 0;
+
+            while (hasNextPage) {
+                const query = `#graphql
+                    query ($cursor: String) {
+                        products(first: ${PRODUCT_BATCH_SIZE}, after: $cursor) {
+                            pageInfo {
+                                hasNextPage
+                                endCursor
+                            }
+                            edges {
+                                cursor
+                                node {
+                                    id
+                                    title
+                                    handle
+                                    vendor
+                                    productType
+                                    status
+                                    totalInventory
+                                    createdAt
+                                    updatedAt
+                                    publishedAt
+                                    templateSuffix
+                                    descriptionHtml
+                                    tags
+                                    variants(first: ${VARIANT_BATCH_SIZE_MAIN}) {
+                                        pageInfo {
+                                            hasNextPage
+                                        }
+                                        edges {
+                                            cursor
+                                            node {
+                                                id
+                                                sku
+                                                price
+                                                compareAtPrice
+                                                barcode
+                                                position
+                                                taxable
+                                                selectedOptions {
+                                                    name
+                                                    value
+                                                }
+                                                inventoryItem {
+                                                    id
+                                                    tracked
+                                                    inventoryLevels(first: ${locationCount}) {
+                                                        edges {
+                                                            node {
+                                                                location {
+                                                                    id
+                                                                    name
+                                                                }
+                                                                quantities(names: ["available", "on_hand", "committed", "reserved", "damaged", "safety_stock", "quality_control", "incoming"]) {
+                                                                    name
+                                                                    quantity
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                `;
+
+                const response = await admin.graphql(query, {
+                    variables: { cursor }
+                });
+
+                const data = await response.json();
+                if (data.errors) {
+                    console.error("[Export] GraphQL Error:", JSON.stringify(data.errors));
+                    break;
+                }
+
+                const products = data.data.products;
+
+                // Fetch remaining variants for products with more than batch size
+                for (const edge of products.edges) {
+                    const product = edge.node;
+                    if (product.variants.pageInfo.hasNextPage) {
+                        console.log(`[Export] Product ${product.id} has more variants, fetching all...`);
+                        const allVariants = await fetchAllVariants(
+                            product.id,
+                            product.variants.edges,
+                            product.variants.pageInfo.hasNextPage,
+                            VARIANT_BATCH_SIZE_HELPER,
+                            locationCount
+                        );
+                        product.variants.edges = allVariants;
+                    }
+                }
+
+                allProductEdges.push(...products.edges);
+                totalFetched += products.edges.length;
+
+                // Update progress
+                const progress = totalProducts > 0 ? Math.floor((totalFetched / totalProducts) * 100) : 0;
+                await prisma.job.update({
+                    where: { id: job.id },
+                    data: {
+                        progress,
+                        processedItems: totalFetched
+                    }
+                });
+
+                console.log(`[Export] Progress: ${totalFetched}/${totalProducts} products (${progress}%)`);
+
+                hasNextPage = products.pageInfo.hasNextPage;
+                cursor = products.pageInfo.endCursor;
+            }
+
+            console.log(`[Export] Fetched ${allProductEdges.length} products total`);
+
+            // Create one row per variant instead of one row per product
+            const products = allProductEdges.flatMap((edge: any) => {
+                const p = edge.node;
+                const variants = p.variants.edges;
+
+                // Helper function to create a row for a given product and variant
+                const createRow = (v: any) => {
+                    const row: any = {};
+
+                    const getColumnValue = (col: string) => {
+                        // Get option values from selectedOptions array
+                        const option1 = v.selectedOptions?.[0];
+                        const option2 = v.selectedOptions?.[1];
+                        const option3 = v.selectedOptions?.[2];
+
+                        switch (col) {
+                            // Product fields
+                            case "ID": return p.id;
+                            case "Handle": return p.handle;
+                            case "Command": return "UPDATE";
+                            case "Title": return p.title;
+                            case "Body HTML": return p.descriptionHtml;
+                            case "Vendor": return p.vendor;
+                            case "Type": return p.productType;
+                            case "Tags": return Array.isArray(p.tags) ? p.tags.join(", ") : (typeof p.tags === 'string' ? p.tags : "");
+                            case "Status": return p.status;
+                            case "Created At": return p.createdAt;
+                            case "Updated At": return p.updatedAt;
+                            case "Published At": return p.publishedAt;
+                            case "Template Suffix": return p.templateSuffix;
+                            case "Total Inventory Qty": return p.totalInventory;
+
+                            // Variant basic fields
+                            case "Variant ID": return v.id;
+                            case "Variant SKU": return v.sku;
+                            case "Variant Price": return v.price;
+                            case "Variant Compare At Price": return v.compareAtPrice;
+                            case "Variant Barcode": return v.barcode;
+                            case "Variant Position": return v.position;
+                            case "Variant Taxable": return v.taxable ? "TRUE" : "FALSE";
+                            case "Variant Weight": return v.weight;
+                            case "Variant Inventory Item ID": return v.inventoryItem?.id;
+                            case "Variant Inventory Qty": return v.inventoryQuantity;
+
+                            // Option fields
+                            case "Option1 Name": return option1?.name || "";
+                            case "Option1 Value": return option1?.value || "";
+                            case "Option2 Name": return option2?.name || "";
+                            case "Option2 Value": return option2?.value || "";
+                            case "Option3 Name": return option3?.name || "";
+                            case "Option3 Value": return option3?.value || "";
+
+                            default:
+                                // Handle inventory columns dynamically
+                                if (col.startsWith('Inventory ')) {
+                                    // Format: "Inventory Available: Snow City Warehouse"
+                                    const match = col.match(/^Inventory (.+?): (.+)$/);
+                                    if (match) {
+                                        const [, fieldName, locationName] = match;
+
+                                        // Check if variant has inventory tracking
+                                        if (!v.inventoryItem || !v.inventoryItem.tracked) {
+                                            return "";
+                                        }
+
+                                        // Find inventory level for this location
+                                        const inventoryLevels = v.inventoryItem?.inventoryLevels?.edges || [];
+                                        const level = inventoryLevels.find((edge: any) =>
+                                            edge.node.location.name === locationName
+                                        );
+
+                                        if (!level) return "";
+
+                                        // Map field names to quantity names
+                                        const quantityMap: Record<string, string> = {
+                                            'Available': 'available',
+                                            'On Hand': 'on_hand',
+                                            'Committed': 'committed',
+                                            'Reserved': 'reserved',
+                                            'Damaged': 'damaged',
+                                            'Safety Stock': 'safety_stock',
+                                            'Quality Control': 'quality_control',
+                                            'Incoming': 'incoming'
+                                        };
+
+                                        // Handle "Adjust" columns (return empty for now, used for imports)
+                                        if (fieldName.includes('Adjust')) {
+                                            return "";
+                                        }
+
+                                        const quantityName = quantityMap[fieldName];
+                                        if (!quantityName) return "";
+
+                                        const quantity = level.node.quantities.find((q: any) =>
+                                            q.name === quantityName
+                                        );
+
+                                        return quantity?.quantity ?? "";
+                                    }
+                                }
+
+                                return "";
+                        }
+                    };
+
+                    if (finalColumns && Array.isArray(finalColumns) && finalColumns.length > 0) {
+                        finalColumns.forEach((col: string) => {
+                            row[col] = getColumnValue(col);
+                        });
+                    } else {
+                        // Fallback if no columns selected (shouldn't happen with UI validation)
+                        row["ID"] = p.id;
+                        row["Title"] = p.title;
+                    }
+
+                    return row;
+                };
+
+                // If no variants, create one row with empty variant data
+                if (variants.length === 0) {
+                    return [createRow({})];
+                }
+
+                // Create one row for each variant
+                return variants.map((variantEdge: any) => {
+                    return createRow(variantEdge.node);
+                });
+            });
+
+            const ws = XLSX.utils.json_to_sheet(products);
+            XLSX.utils.book_append_sheet(wb, ws, "Products");
+            hasData = true;
+        }
+
+        if (hasData) {
+            const fileName = `Export_${new Date().toISOString().replace(/[:.]/g, "-")}.xlsx`;
+            const publicDir = path.join(process.cwd(), "public", "exports");
+
+            if (!fs.existsSync(publicDir)) {
+                fs.mkdirSync(publicDir, { recursive: true });
+            }
+
+            const filePath = path.join(publicDir, fileName);
+            console.log("[Export] Saving Excel file to:", filePath);
+            XLSX.writeFile(wb, filePath);
+            console.log("[Export] File saved successfully");
+
+            // Update job to Finished with 100% progress
+            await prisma.job.update({
+                where: { id: job.id },
+                data: {
+                    status: "Finished",
+                    progress: 100,
+                    // Store relative path for download
+                    details: JSON.stringify({
+                        sheets,
+                        columns: finalColumns,
+                        format,
+                        file: `/exports/${fileName}`,
+                        fileName: fileName
+                    })
+                }
+            });
+        } else {
+            // Update job to Finished if no data processed (or handle empty)
+            await prisma.job.update({
+                where: { id: job.id },
+                data: {
+                    status: "Finished",
+                    progress: 100
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error("[Export] Export failed:", error);
+        await prisma.job.update({
+            where: { id: job.id },
+            data: {
+                status: "Failed",
+                progress: 0,
+                details: JSON.stringify({
+                    sheets,
+                    columns,
+                    format,
+                    error: error instanceof Error ? error.message : String(error)
+                })
+            }
+        });
+    }
+
+    return redirect("/app");
+};
+
 export default function NewExport() {
+    const loaderData = useLoaderData<typeof loader>();
     const navigate = useNavigate();
     const [preset, setPreset] = useState("New Blank Export");
-    const [format, setFormat] = useState("matrixify-excel");
-    const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
+    const [format, setFormat] = useState(loaderData?.presetFormat || "matrixify-excel");
+    const [selectedSheets, setSelectedSheets] = useState<string[]>(loaderData?.presetSheets || []);
     const [popoverActive, setPopoverActive] = useState(false);
     const [presetPopoverActive, setPresetPopoverActive] = useState(false);
     const [formatPopoverActive, setFormatPopoverActive] = useState(false);
-    const [expandedSheets, setExpandedSheets] = useState<string[]>([]);
+    const [expandedSheets, setExpandedSheets] = useState<string[]>(loaderData?.presetSheets || []);
     const [optionsOpen, setOptionsOpen] = useState(false);
 
     // New state for column selection
     const [expandedColumnGroups, setExpandedColumnGroups] = useState<string[]>([]);
-    const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
+    const [selectedColumns, setSelectedColumns] = useState<string[]>(loaderData?.presetColumns || []);
 
     const togglePopover = useCallback(
         () => setPopoverActive((popoverActive) => !popoverActive),
@@ -391,8 +792,8 @@ export default function NewExport() {
                             <InlineStack gap="300" blockAlign="center" wrap={false}>
                                 <div onClick={(e) => e.stopPropagation()}>
                                     <Checkbox
-                                        labelHidden
                                         label={sheet.name}
+                                        labelHidden
                                         checked={selectedSheets.includes(sheet.id)}
                                         onChange={() => handleSheetSelection(sheet.id)}
                                     />
@@ -903,6 +1304,6 @@ export default function NewExport() {
                     </Layout.Section>
                 </Layout>
             </Page>
-        </Form>
+        </Form >
     );
 }

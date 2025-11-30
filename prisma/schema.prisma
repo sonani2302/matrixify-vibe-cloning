@@ -39,4 +39,15 @@ model Job {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   details   String?
+  
+  // Progress tracking fields
+  progress       Int?     @default(0)      // Percentage (0-100)
+  totalItems     Int?                      // Total products to export
+  processedItems Int?     @default(0)      // Products processed so far
+}
+
+model Settings {
+  shop          String @id
+  fileErasure   String @default("keep_all") // "keep_all" or "erase_older_than"
+  erasureDays   Int    @default(90)
 }

@@ -9,7 +9,7 @@ import enTranslations from "@shopify/polaris/locales/en.json";
 import { authenticate } from "../shopify.server";
 
 export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: polarisStyles },
+  { rel: "stylesheet", href: polarisStyles, precedence: "high" },
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
