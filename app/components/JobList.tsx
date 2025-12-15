@@ -80,17 +80,21 @@ export function JobList({ jobs }: { jobs: any[] }) {
         }
     };
 
-    const formatDuration = (createdAt: string) => {
-        // Placeholder logic
-        return "7 sec";
+    const formatDuration = (createdAt: string, updatedAt: string) => {
+        if (!updatedAt) return "...";
+        const start = new Date(createdAt).getTime();
+        const end = new Date(updatedAt).getTime();
+        const diff = end - start;
+        const seconds = Math.floor(diff / 1000);
+        return `${seconds} sec`;
     };
 
     return (
         <Card padding="0">
             {jobs.map((job: any, index: number) => {
                 const details = parseJobDetails(job);
-                const exportedCount = 10; // Placeholder
-                const totalCount = 17; // Placeholder
+                const exportedCount = job.processedItems || 0;
+                const totalCount = job.totalItems || 0;
                 const limitedCount = 0; // Placeholder
 
                 return (
@@ -151,7 +155,7 @@ export function JobList({ jobs }: { jobs: any[] }) {
                                 </div>
 
                                 <Text as="p" variant="bodySm" tone="subdued">
-                                    {formatDate(job.createdAt)} Duration: {formatDuration(job.createdAt)}
+                                    {formatDate(job.createdAt)} Duration: {formatDuration(job.createdAt, job.updatedAt)}
                                 </Text>
                             </div>
 
@@ -166,11 +170,9 @@ export function JobList({ jobs }: { jobs: any[] }) {
                                 </Badge>
 
                                 {job.status === "Failed" && details.error && (
-                                    <div style={{ maxWidth: "200px", textAlign: "right" }}>
-                                        <Text as="span" tone="critical" variant="bodySm">
-                                            {details.error}
-                                        </Text>
-                                    </div>
+                                    <Badge tone="critical">
+                                        Error
+                                    </Badge>
                                 )}
 
                                 {job.status === "Finished" && details.file && (

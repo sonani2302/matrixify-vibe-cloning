@@ -270,7 +270,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                         variables: { productId, cursor }
                     });
 
-                    const data = await response.json();
+                    const data: any = await response.json();
                     if (data.errors) {
                         console.error("[Export] Error fetching more variants:", data.errors);
                         break;
@@ -1036,7 +1036,18 @@ export default function NewExport() {
                                                                                                         </Badge>
                                                                                                     )}
                                                                                                 </InlineStack>
-                                                                                                <Icon source={isGroupExpanded ? ChevronUpIcon : ChevronDownIcon} />
+                                                                                                <div
+                                                                                                    style={{
+                                                                                                        padding: "4px 8px",
+                                                                                                        borderRadius: "4px",
+                                                                                                        transition: "background-color 0.2s ease",
+                                                                                                        cursor: "pointer"
+                                                                                                    }}
+                                                                                                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#e1e3e5"}
+                                                                                                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                                                                                                >
+                                                                                                    <Icon source={isGroupExpanded ? ChevronUpIcon : ChevronDownIcon} />
+                                                                                                </div>
                                                                                             </div>
                                                                                         </div>
                                                                                         {isGroupExpanded && (
@@ -1120,15 +1131,15 @@ export default function NewExport() {
                                                                 <InlineStack gap="200" blockAlign="center">
                                                                     <Checkbox label="Schedule on:" checked={false} onChange={() => { }} />
                                                                     <div style={{ width: "120px" }}>
-                                                                        <TextField label="Date" labelHidden value="2025-11-29" onChange={() => { }} autoComplete="off" size="slim" />
+                                                                        <TextField label="Date" labelHidden value="2025-11-29" onChange={() => { }} autoComplete="off" />
                                                                     </div>
                                                                     <Text as="span" variant="bodyMd">, at</Text>
                                                                     <div style={{ width: "60px" }}>
-                                                                        <TextField label="Hour" labelHidden value="00" onChange={() => { }} autoComplete="off" size="slim" type="number" />
+                                                                        <TextField label="Hour" labelHidden value="00" onChange={() => { }} autoComplete="off" type="number" />
                                                                     </div>
                                                                     <Text as="span" variant="bodyMd">:</Text>
                                                                     <div style={{ width: "60px" }}>
-                                                                        <TextField label="Minute" labelHidden value="00" onChange={() => { }} autoComplete="off" size="slim" type="number" />
+                                                                        <TextField label="Minute" labelHidden value="00" onChange={() => { }} autoComplete="off" type="number" />
                                                                     </div>
                                                                     <Text as="span" variant="bodyMd">America/New_York time</Text>
                                                                 </InlineStack>
@@ -1136,14 +1147,14 @@ export default function NewExport() {
                                                                 <InlineStack gap="200" blockAlign="center">
                                                                     <Checkbox label="Repeat every:" checked={false} onChange={() => { }} />
                                                                     <div style={{ width: "60px" }}>
-                                                                        <TextField label="Count" labelHidden value="1" onChange={() => { }} autoComplete="off" size="slim" type="number" />
+                                                                        <TextField label="Count" labelHidden value="1" onChange={() => { }} autoComplete="off" type="number" />
                                                                     </div>
                                                                     <div style={{ width: "80px" }}>
-                                                                        <Select label="Unit" labelHidden options={[{ label: "days", value: "days" }]} value="days" onChange={() => { }} size="slim" />
+                                                                        <Select label="Unit" labelHidden options={[{ label: "days", value: "days" }]} value="days" onChange={() => { }} />
                                                                     </div>
                                                                     <Text as="span" variant="bodyMd">, run</Text>
                                                                     <div style={{ width: "140px" }}>
-                                                                        <Select label="Duration" labelHidden options={[{ label: "until cancelled", value: "until_cancelled" }]} value="until_cancelled" onChange={() => { }} size="slim" />
+                                                                        <Select label="Duration" labelHidden options={[{ label: "until cancelled", value: "until_cancelled" }]} value="until_cancelled" onChange={() => { }} />
                                                                     </div>
                                                                     <Text as="span" variant="bodyMd">times</Text>
                                                                 </InlineStack>
@@ -1167,7 +1178,7 @@ export default function NewExport() {
                                                                             value="Export_%Y-%m-%d_%H%M%S"
                                                                             onChange={() => { }}
                                                                             autoComplete="off"
-                                                                            size="slim"
+
                                                                         />
                                                                     </div>
                                                                     <Link url="#">Dynamic placeholders</Link>
@@ -1184,7 +1195,7 @@ export default function NewExport() {
                                                                             options={[{ label: "Started At (Default)", value: "started_at" }]}
                                                                             value="started_at"
                                                                             onChange={() => { }}
-                                                                            size="slim"
+
                                                                         />
                                                                     </div>
                                                                 </InlineStack>
@@ -1206,7 +1217,7 @@ export default function NewExport() {
                                                                             options={[{ label: "Full URL", value: "full_url" }]}
                                                                             value="full_url"
                                                                             onChange={() => { }}
-                                                                            size="slim"
+
                                                                         />
                                                                     </div>
                                                                     <div style={{ flexGrow: 1 }}>
@@ -1217,7 +1228,7 @@ export default function NewExport() {
                                                                             onChange={() => { }}
                                                                             placeholder="scheme://user:password@serverport/path/to/folder/"
                                                                             autoComplete="off"
-                                                                            size="slim"
+
                                                                         />
                                                                     </div>
                                                                 </InlineStack>
@@ -1259,7 +1270,7 @@ export default function NewExport() {
                                                                             options={[{ label: "2025-11-29 07:44:18 -0500 (Default ISO)", value: "default_iso" }]}
                                                                             value="default_iso"
                                                                             onChange={() => { }}
-                                                                            size="slim"
+
                                                                         />
                                                                     </div>
                                                                 </InlineStack>
@@ -1275,7 +1286,7 @@ export default function NewExport() {
                                                                             options={[{ label: "Phone numbers", value: "phone_numbers" }]}
                                                                             value="phone_numbers"
                                                                             onChange={() => { }}
-                                                                            size="slim"
+
                                                                         />
                                                                     </div>
                                                                 </InlineStack>

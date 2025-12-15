@@ -27,29 +27,7 @@ import { JobList } from "../components/JobList";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
     await authenticate.admin(request);
 
-    // Migration Logic: Update old IDs to 10-digit format
-    const allJobs = await prisma.job.findMany();
-    for (const job of allJobs) {
-        if (!/^\d{10}$/.test(job.id)) {
-            const newId = Math.floor(1000000000 + Math.random() * 9000000000).toString();
-            try {
-                await prisma.job.create({
-                    data: {
-                        id: newId,
-                        type: job.type,
-                        entity: job.entity,
-                        status: job.status,
-                        createdAt: job.createdAt,
-                        updatedAt: job.updatedAt,
-                        details: job.details,
-                    }
-                });
-                await prisma.job.delete({ where: { id: job.id } });
-            } catch (e) {
-                console.error("Migration failed for job", job.id, e);
-            }
-        }
-    }
+
 
     const url = new URL(request.url);
     const q = url.searchParams.get("q");
